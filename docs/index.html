@@ -20,7 +20,35 @@
 
     <div class="container">
         <header>
-            <div class="logo">
+            <!-- Telegram Settings -->
+            <div class="settings-group">
+                <h3><i data-lucide="send"></i> Telegram Уведомления</h3>
+                <div class="input-group">
+                    <label for="tg-bot-token">Bot Token</label>
+                    <input type="password" id="tg-bot-token" placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11">
+                </div>
+                <div class="input-group">
+                    <label for="tg-chat-id">Chat ID</label>
+                    <div class="input-with-button">
+                        <input type="text" id="tg-chat-id" placeholder="-100123456789">
+                        <button id="test-tg-btn" class="btn-small">Test</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Filters -->
+            <div class="settings-group">
+                <h3><i data-lucide="filter"></i> Фильтры</h3>
+                <div class="switch-group">
+                    <label class="switch">
+                        <input type="checkbox" id="filter-exchanges">
+                        <span class="slider round"></span>
+                    </label>
+                    <span>Скрывать биржи (Binance, OKX, etc.)</span>
+                </div>
+            </div>
+
+            <div class="actions">
                 <i data-lucide="waves" class="icon-primary"></i>
                 <h1>Whale<span>Tracker</span></h1>
             </div>
@@ -150,7 +178,7 @@
         </div>
     </div>
 
-    <script src="script.js?v=8"></script>
+    <script src="script.js?v=9"></script>
     <script>
         lucide.createIcons();
     </script>
