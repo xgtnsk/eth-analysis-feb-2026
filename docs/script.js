@@ -533,65 +533,35 @@ function isExchangeWallet(address) {
 async function sendTelegramMessage(text) {
     if (!state.telegramToken || !state.telegramChatId) return false;
 
-    const encodedText = encodeURIComponent(text);
-    const directUrl = `https://api.telegram.org/bot${state.telegramToken}/sendMessage?chat_id=${state.telegramChatId}&text=${encodedText}&parse_mode=HTML`;
-
-    const proxies = [
-        // 1. corsproxy.io (Standard)
-        {
-            url: `https://corsproxy.io/?${encodeURIComponent(`https://api.telegram.org/bot${state.telegramToken}/sendMessage`)}`,
+    // Прямая отправка без всяких прокси
+    const url = `https://api.telegram.org/bot${state.telegramToken}/sendMessage`;
+    
+    try {
+        // Пробуем отправить "как есть"
+        await fetch(url, {
             method: 'POST',
-            body: {
-                chat_id: state.telegramChatId,
-                text: text,
-                parse_mode: 'HTML',
-                disable_web_page_preview: true
-            }
-        },
-        // 2. allorigins.win (Fallback, GET only)
-        {
-            url: `https://api.allorigins.win/raw?url=${encodeURIComponent(directUrl)}`,
-            method: 'GET'
-        },
-        // 3. thingproxy (Fallback 2)
-        {
-            url: `https://thingproxy.freeboard.io/fetch/${`https://api.telegram.org/bot${state.telegramToken}/sendMessage`}`,
-            method: 'POST',
-            body: {
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
                 chat_id: state.telegramChatId,
                 text: text,
                 parse_mode: 'HTML'
-            }
-        }
-    ];
-
-    for (const proxy of proxies) {
+            })
+        });
+        console.log("Sent directly!");
+        return true;
+    } catch (e1) {
+        console.warn("Direct send failed, trying no-cors...");
         try {
-            const options = {
-                method: proxy.method,
-                headers: proxy.method === 'POST' ? { 'Content-Type': 'application/json' } : {}
-            };
-            
-            if (proxy.method === 'POST') {
-                options.body = JSON.stringify(proxy.body);
-            }
-
-            const response = await fetch(proxy.url, options);
-            const data = await response.json();
-            
-            if (data.ok) {
-                console.log("Telegram sent successfully via", proxy.url);
-                return true;
-            } else {
-                console.error("Telegram API Error:", data);
-            }
-        } catch (e) {
-            console.warn(`Proxy failed (${proxy.url}):`, e);
+            // Если не вышло — отправляем "вслепую"
+            const directUrl = `${url}?chat_id=${state.telegramChatId}&text=${encodeURIComponent(text)}&parse_mode=HTML`;
+            await fetch(directUrl, { mode: 'no-cors' });
+            console.log("Sent via no-cors!");
+            return true;
+        } catch (e2) {
+            console.error("All failed", e2);
+            return false;
         }
     }
-
-    console.error("All Telegram proxies failed.");
-    return false;
 }
 
 // Event Listeners for New Settings
