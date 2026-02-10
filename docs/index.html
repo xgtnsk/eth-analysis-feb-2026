@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="ru">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,25 +8,48 @@
     <link rel="stylesheet" href="styles.css">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=JetBrains+Mono:wght@400;700&display=swap"
+        rel="stylesheet">
     <script src="https://unpkg.com/lucide@latest"></script>
+    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
 </head>
+
 <body>
     <div class="glass-bg"></div>
-    
+
     <div class="container">
         <header>
             <div class="logo">
                 <i data-lucide="waves" class="icon-primary"></i>
                 <h1>Whale<span>Tracker</span></h1>
             </div>
-            <div class="status-indicator">
-                <div class="dot" id="status-dot"></div>
-                <span id="status-text">Ожидание...</span>
+            <div class="header-controls">
+                <div class="chart-toggle">
+                    <label class="switch">
+                        <input type="checkbox" id="toggle-chart" checked>
+                        <span class="slider round"></span>
+                    </label>
+                    <span>График</span>
+                </div>
+                <div class="status-indicator">
+                    <div class="dot" id="status-dot"></div>
+                    <span id="status-text">Ожидание...</span>
+                </div>
             </div>
         </header>
 
         <main>
+            <!-- График TradingView -->
+            <section class="card chart-card" id="chart-section">
+                <div class="card-header space-between">
+                    <div class="header-left">
+                        <i data-lucide="line-chart"></i>
+                        <h2>ETH / USD (Whale Activity)</h2>
+                    </div>
+                </div>
+                <div id="chart-container" style="height: 350px; width: 100%;"></div>
+            </section>
             <!-- Настройки -->
             <section class="card settings-card">
                 <div class="card-header">
@@ -117,4 +141,5 @@
         lucide.createIcons();
     </script>
 </body>
+
 </html>

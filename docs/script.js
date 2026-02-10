@@ -5,16 +5,21 @@ let state = {
     threshold: parseFloat(localStorage.getItem('eth_whale_threshold')) || 100,
     interval: parseInt(localStorage.getItem('eth_whale_interval')) || 10,
     aliases: JSON.parse(localStorage.getItem('eth_whale_aliases') || '{}'),
+    chartVisible: localStorage.getItem('eth_whale_chart_visible') !== 'false',
     currentBlock: 0,
     whalesCount: 0,
     totalEthMoved: 0,
     isMonitoring: false,
-    timer: null
+    timer: null,
+    chart: null,
+    candleSeries: null
 };
 
 // DOM Elements
 const elements = {
     apiKey: document.getElementById('api-key'),
+    toggleChart: document.getElementById('toggle-chart'),
+    chartSection: document.getElementById('chart-section'),
     threshold: document.getElementById('eth-threshold'),
     interval: document.getElementById('refresh-interval'),
     startBtn: document.getElementById('start-btn'),
@@ -36,6 +41,83 @@ const elements = {
 elements.apiKey.value = state.apiKey;
 elements.threshold.value = state.threshold;
 elements.interval.value = state.interval;
+elements.toggleChart.checked = state.chartVisible;
+elements.chartSection.style.display = state.chartVisible ? 'block' : 'none';
+
+// Chart Initialization
+async function initChart() {
+    const chartOptions = {
+        layout: {
+            background: { color: 'transparent' },
+            textColor: '#94a3b8',
+        },
+        grid: {
+            vertLines: { color: 'rgba(255, 255, 255, 0.05)' },
+            horzLines: { color: 'rgba(255, 255, 255, 0.05)' },
+        },
+        crosshair: {
+            mode: LightweightCharts.CrosshairMode.Normal,
+        },
+        rightPriceScale: {
+            borderColor: 'rgba(255, 255, 255, 0.1)',
+        },
+        timeScale: {
+            borderColor: 'rgba(255, 255, 255, 0.1)',
+            timeVisible: true,
+        },
+    };
+
+    state.chart = LightweightCharts.createChart(document.getElementById('chart-container'), chartOptions);
+    state.candleSeries = state.chart.addCandlestickSeries({
+        upColor: '#10b981',
+        downColor: '#ef4444',
+        borderVisible: false,
+        wickUpColor: '#10b981',
+        wickDownColor: '#ef4444',
+    });
+
+    await fetchChartData();
+}
+
+async function fetchChartData() {
+    try {
+        // Fetch 100 hourly candles
+        const response = await fetch('https://min-api.cryptocompare.com/data/v2/histoitem?fsym=ETH&tsym=USD&limit=100&itemType=hour');
+        const data = await response.json();
+        if (data.Data && data.Data.Data) {
+            const formattedData = data.Data.Data.map(d => ({
+                time: d.time,
+                open: d.open,
+                high: d.high,
+                low: d.low,
+                close: d.close,
+            }));
+            state.candleSeries.setData(formattedData);
+            state.chart.timeScale().fitContent();
+        }
+    } catch (e) {
+        console.error("Chart data fetch error:", e);
+    }
+}
+
+function addChartMarker(valueEth, address) {
+    if (!state.candleSeries) return;
+
+    const time = Math.floor(Date.now() / 1000);
+    const alias = state.aliases[address.toLowerCase()] || 'Whale';
+
+    const markers = state.candleSeries.getMarkers() || [];
+    markers.push({
+        time: time,
+        position: 'aboveBar',
+        color: '#3b82f6',
+        shape: 'circle',
+        text: `${valueEth.toFixed(0)} ETH (${alias})`,
+        size: 2
+    });
+
+    state.candleSeries.setMarkers(markers);
+}
 
 // Functions
 async function fetchLatestBlock() {
@@ -138,6 +220,9 @@ async function scanNewBlocks() {
                     if (val >= state.threshold) {
                         addTransactionToFeed(tx, val);
                         updateStats(val);
+                        if (val >= 5000) {
+                            addChartMarker(val, tx.from);
+                        }
                     }
                 });
             }
@@ -149,6 +234,16 @@ async function scanNewBlocks() {
 }
 
 // Event Handlers
+elements.toggleChart.addEventListener('change', (e) => {
+    state.chartVisible = e.target.checked;
+    localStorage.setItem('eth_whale_chart_visible', state.chartVisible);
+    elements.chartSection.style.display = state.chartVisible ? 'block' : 'none';
+    if (state.chartVisible && state.chart) {
+        // Redraw or resize chart when shown
+        state.chart.applyOptions({ width: elements.chartSection.clientWidth - 48 });
+    }
+});
+
 elements.startBtn.addEventListener('click', () => {
     if (state.isMonitoring) {
         state.isMonitoring = false;
@@ -223,3 +318,6 @@ document.querySelectorAll('.pill').forEach(pill => {
         parentInput.value = val;
     });
 });
+
+// Initialize Chart on load
+initChart();
