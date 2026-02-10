@@ -176,16 +176,39 @@ input:checked+.slider:before {
     margin-bottom: 2rem;
 }
 
-.input-group {
+/* Settings Groups */
+.settings-group {
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.settings-group h3 {
     display: flex;
-    flex-direction: column;
+    align-items: center;
     gap: 0.5rem;
+    font-size: 1rem;
+    color: var(--text-secondary);
+    margin-bottom: 1rem;
+}
+
+.settings-group h3 i {
+    width: 18px;
+    height: 18px;
+}
+
+.input-group {
+    margin-bottom: 1rem;
 }
 
 .input-group label {
-    font-size: 0.8rem;
+    display: block;
+    font-size: 0.85rem;
     color: var(--text-secondary);
-    font-weight: 600;
+    /* Changed from --text-muted */
+    margin-bottom: 0.5rem;
 }
 
 input {
@@ -202,6 +225,29 @@ input {
 input:focus {
     outline: none;
     border-color: var(--accent-primary);
+}
+
+.input-group input {
+    width: 100%;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    color: var(--text-primary);
+    font-size: 0.95rem;
+    transition: all 0.3s ease;
+}
+
+.input-group input:focus {
+    border-color: var(--accent-primary);
+    /* Changed from --primary */
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+}
+
+.input-with-button {
+    display: flex;
+    gap: 0.5rem;
 }
 
 .input-with-suggest {
@@ -229,6 +275,30 @@ input:focus {
 .pill:hover {
     border-color: var(--accent-primary);
     color: var(--accent-primary);
+}
+
+.btn-small {
+    background: rgba(255, 255, 255, 0.1);
+    border: none;
+    border-radius: 8px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 0 1rem;
+    font-size: 0.9rem;
+    transition: all 0.2s;
+}
+
+.btn-small:hover {
+    background: rgba(255, 255, 255, 0.2);
+    color: var(--text-primary);
+}
+
+.switch-group {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    color: var(--text-secondary);
+    font-size: 0.95rem;
 }
 
 /* Buttons */
