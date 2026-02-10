@@ -531,32 +531,67 @@ function isExchangeWallet(address) {
 }
 
 async function sendTelegramMessage(text) {
-    if (!state.telegramToken || !state.telegramChatId) return;
+    if (!state.telegramToken || !state.telegramChatId) return false;
 
-    // Use CORS Proxy to bypass browser restrictions on Telegram API
-    const tgUrl = `https://api.telegram.org/bot${state.telegramToken}/sendMessage`;
-    const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(tgUrl)}`;
+    const encodedText = encodeURIComponent(text);
+    const directUrl = `https://api.telegram.org/bot${state.telegramToken}/sendMessage?chat_id=${state.telegramChatId}&text=${encodedText}&parse_mode=HTML`;
 
-    const params = {
-        chat_id: state.telegramChatId,
-        text: text,
-        parse_mode: 'HTML',
-        disable_web_page_preview: true
-    };
-
-    try {
-        const response = await fetch(proxyUrl, {
+    const proxies = [
+        // 1. corsproxy.io (Preferred, supports POST)
+        {
+            url: `https://corsproxy.io/?${encodeURIComponent(`https://api.telegram.org/bot${state.telegramToken}/sendMessage`)}`,
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(params)
-        });
-        const data = await response.json();
-        if (!data.ok) {
-            console.error("Telegram Error:", data);
+            body: {
+                chat_id: state.telegramChatId,
+                text: text,
+                parse_mode: 'HTML',
+                disable_web_page_preview: true
+            }
+        },
+        // 2. allorigins.win (Fallback, GET only)
+        {
+            url: `https://api.allorigins.win/raw?url=${encodeURIComponent(directUrl)}`,
+            method: 'GET'
+        },
+        // 3. thingproxy (Fallback 2)
+        {
+            url: `https://thingproxy.freeboard.io/fetch/${`https://api.telegram.org/bot${state.telegramToken}/sendMessage`}`,
+            method: 'POST',
+            body: {
+                chat_id: state.telegramChatId,
+                text: text,
+                parse_mode: 'HTML'
+            }
         }
-    } catch (e) {
-        console.error("Telegram Network Error:", e);
+    ];
+
+    for (const proxy of proxies) {
+        try {
+            const options = {
+                method: proxy.method,
+                headers: proxy.method === 'POST' ? { 'Content-Type': 'application/json' } : {}
+            };
+            
+            if (proxy.method === 'POST') {
+                options.body = JSON.stringify(proxy.body);
+            }
+
+            const response = await fetch(proxy.url, options);
+            const data = await response.json();
+            
+            if (data.ok) {
+                console.log("Telegram sent successfully via", proxy.url);
+                return true;
+            } else {
+                console.error("Telegram API Error:", data);
+            }
+        } catch (e) {
+            console.warn(`Proxy failed (${proxy.url}):`, e);
+        }
     }
+
+    console.error("All Telegram proxies failed.");
+    return false;
 }
 
 // Event Listeners for New Settings
@@ -580,8 +615,21 @@ elements.testTgBtn.addEventListener('click', async () => {
         alert("Please enter Bot Token and Chat ID first.");
         return;
     }
-    await sendTelegramMessage("🐋 <b>Whale Tracker Test</b>\nSuccess! Notifications are working.");
-    alert("Test message sent. Check your Telegram.");
+    
+    const originalText = elements.testTgBtn.textContent;
+    elements.testTgBtn.textContent = "Sending...";
+    elements.testTgBtn.disabled = true;
+
+    const success = await sendTelegramMessage("🐋 <b>Whale Tracker Test</b>\nSuccess! Notifications are working.");
+    
+    elements.testTgBtn.textContent = originalText;
+    elements.testTgBtn.disabled = false;
+
+    if (success) {
+        alert("Test message sent! Check your Telegram.");
+    } else {
+        alert("Failed to send message. Please check the Console (F12) for errors.");
+    }
 });
 
 // Initialize Chart on load
