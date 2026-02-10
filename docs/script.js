@@ -1,5 +1,22 @@
 // Configuration & State
 const BASE_URL = "https://api.etherscan.io/v2/api";
+const KNOWN_EXCHANGES = {
+    '0x28c6c06298d514db089934071355e5743bf21d60': 'Binance 14',
+    '0x21a31ee1afc51d94c2efccaa2092ad1028285549': 'Binance 15',
+    '0x3f5ce5fbfe3e9af3971dd833d26ba9b5c936f0be': 'Binance 16',
+    '0xd551234ae421e3bcba99a0da6d736074f22192ff': 'Binance 3',
+    '0x56eddb7aa87536c09ccc2793473599fd21a8b17f': 'Binance Hot',
+    '0x77696bb39917c91a0c3908d577d5e322095425ca': 'Binance Hot 2',
+    '0x47ac0fb4f2d84898e4d9e7b4dab3c24507a6d503': 'Binance Hot 6',
+    '0xdfd5293d8e347dfe59e90efd55b2956a1343963d': 'Binance 14',
+    '0xe78388b4ce79068e89bf8aa7f218ef6b9ab64418': 'Kraken 3',
+    '0x71660c4005ba85c37ccec55d0c4493e66fe775d3': 'Coinbase 1',
+    '0x503828976d22510aad0201ac7ec88293211d23da': 'Coinbase 2',
+    '0xddfabcdc4d8ffc6d5beaf154f18b778f892a0740': 'Coinbase 3',
+    '0xa090e606e30bd747d4e6245a1517ebd817d86d56': 'OKX 1',
+    '0x6cc5f688a315f3dc28a7781717a9a798a59fda7b': 'OKX 2'
+};
+
 let state = {
     apiKey: localStorage.getItem('eth_whale_api_key') || '',
     threshold: parseFloat(localStorage.getItem('eth_whale_threshold')) || 100,
@@ -7,6 +24,14 @@ let state = {
     aliases: JSON.parse(localStorage.getItem('eth_whale_aliases') || '{}'),
     chartVisible: localStorage.getItem('eth_whale_chart_visible') !== 'false',
     timeframe: 'hour', // minute, hour, day
+
+    // Telegram Settings
+    telegramToken: localStorage.getItem('eth_whale_tg_token') || '8421336656:AAEeNiiCcJbiyxRWJfIslw-vrvOq4aYkaPU',
+    telegramChatId: localStorage.getItem('eth_whale_tg_chat_id') || '8122958356',
+
+    // Filter Settings
+    filterExchanges: localStorage.getItem('eth_whale_filter_exchanges') === 'true',
+
     currentBlock: 0,
     whalesCount: 0,
     totalEthMoved: 0,
@@ -40,7 +65,12 @@ const elements = {
     modalAddress: document.getElementById('modal-address'),
     aliasInput: document.getElementById('alias-input'),
     saveAliasBtn: document.getElementById('save-alias'),
-    closeModalBtn: document.getElementById('close-modal')
+    closeModalBtn: document.getElementById('close-modal'),
+    // New Settings
+    tgBotToken: document.getElementById('tg-bot-token'),
+    tgChatId: document.getElementById('tg-chat-id'),
+    testTgBtn: document.getElementById('test-tg-btn'),
+    filterExchanges: document.getElementById('filter-exchanges')
 };
 
 // Initial setup from localStorage
@@ -49,6 +79,11 @@ elements.threshold.value = state.threshold;
 elements.interval.value = state.interval;
 elements.toggleChart.checked = state.chartVisible;
 elements.chartSection.style.display = state.chartVisible ? 'block' : 'none';
+
+// New Settings Init
+elements.tgBotToken.value = state.telegramToken;
+elements.tgChatId.value = state.telegramChatId;
+elements.filterExchanges.checked = state.filterExchanges;
 
 // Chart Initialization
 async function initChart() {
@@ -77,6 +112,9 @@ async function initChart() {
     state.candleSeries = state.chart.addSeries(LightweightCharts.CandlestickSeries, {
         upColor: '#10b981',
         downColor: '#ef4444',
+        borderVisible: false,
+        wickUpColor: '#10b981',
+        wickDownColor: '#ef4444',
         borderVisible: false,
         wickUpColor: '#10b981',
         wickDownColor: '#ef4444',
@@ -135,16 +173,24 @@ async function fetchChartData() {
     }
 }
 
-function addChartMarker(valueEth, address, blockTime) {
+function addChartMarker(valueEth, address, blockTime, skipUpdate = false) {
     if (!state.candleSeries) return;
 
-    // Use block timestamp if provided, otherwise fallback to current time
-    let markerTime = blockTime || Math.floor(Date.now() / 1000);
+    // Use block timestamp if provided.
+    // CRITICAL: Do NOT fallback to Date.now() if blockTime is missing/invalid, 
+    // as this causes historical transactions to appear on the current candle.
+    let markerTime = blockTime;
+
+    if (!markerTime) {
+        console.warn("Skipping marker due to missing timestamp", address);
+        return;
+    }
 
     // Round time to the nearest interval to ensure it snaps to a candle
+    // IMPORTANT: Snap to the BEGINNING of the period to match CryptoCompare data
     if (state.timeframe === 'minute') markerTime = Math.floor(markerTime / 60) * 60;
-    if (state.timeframe === 'hour') markerTime = Math.floor(markerTime / 3600) * 3600;
-    if (state.timeframe === 'day') markerTime = Math.floor(markerTime / 86400) * 86400;
+    else if (state.timeframe === 'hour') markerTime = Math.floor(markerTime / 3600) * 3600;
+    else if (state.timeframe === 'day') markerTime = Math.floor(markerTime / 86400) * 86400;
 
     const alias = state.aliases[address.toLowerCase()] || address.substring(0, 6) + '...';
 
@@ -157,11 +203,12 @@ function addChartMarker(valueEth, address, blockTime) {
         size: 2
     });
 
-    // Sort markers by time (required by Lightweight Charts)
-    state.markers.sort((a, b) => a.time - b.time);
-
-    // Use v5 API to set markers
-    LightweightCharts.createSeriesMarkers(state.candleSeries, state.markers);
+    if (!skipUpdate) {
+        // Sort markers by time (required by Lightweight Charts)
+        state.markers.sort((a, b) => a.time - b.time);
+        // Use v5 API to set markers
+        LightweightCharts.createSeriesMarkers(state.candleSeries, state.markers);
+    }
 }
 
 // Functions
@@ -201,11 +248,13 @@ async function fetchBlockTransactions(blockNumber) {
                 timestamp: parseInt(data.result.timestamp, 16),
                 transactions: data.result.transactions || []
             };
+        } else {
+            console.warn("Block fetch returned no result", data);
         }
     } catch (e) {
         console.error("Tx fetch error:", e);
     }
-    return { timestamp: 0, transactions: [] };
+    return { timestamp: null, transactions: [] };
 }
 
 function updateStats(valueEth) {
@@ -255,26 +304,46 @@ function addTransactionToFeed(tx, valueEth) {
 async function scanNewBlocks() {
     if (!state.isMonitoring) return;
 
-    const latest = await fetchLatestBlock();
-    if (latest && latest > state.currentBlock) {
-        if (state.currentBlock === 0) {
-            state.currentBlock = latest;
-        } else {
-            for (let b = state.currentBlock + 1; b <= latest; b++) {
-                elements.currentBlock.textContent = b;
-                const { timestamp, transactions } = await fetchBlockTransactions(b);
-                transactions.forEach(tx => {
-                    const val = parseInt(tx.value, 16) / 1e18;
-                    if (val >= state.threshold) {
-                        addTransactionToFeed(tx, val);
-                        updateStats(val);
-                        // All transactions above threshold appear on chart as red arrows
-                        addChartMarker(val, tx.from, timestamp);
-                    }
-                });
+    try {
+        const latest = await fetchLatestBlock();
+        if (latest && latest > state.currentBlock) {
+            if (state.currentBlock === 0) {
+                state.currentBlock = latest;
+            } else {
+                // Limit catch-up to 10 blocks to avoid rapid API depletion
+                const start = Math.max(state.currentBlock + 1, latest - 10);
+                for (let b = start; b <= latest; b++) {
+                    elements.currentBlock.textContent = b;
+
+                    // Throttling for safety
+                    if (b > start) await new Promise(r => setTimeout(r, 200));
+
+                    const { timestamp, transactions } = await fetchBlockTransactions(b);
+                    transactions.forEach(tx => {
+                        const val = parseInt(tx.value, 16) / 1e18;
+                        if (val >= state.threshold) {
+                            // Filter Exchanges
+                            if (state.filterExchanges && (isExchangeWallet(tx.from) || isExchangeWallet(tx.to || ''))) {
+                                return;
+                            }
+
+                            addTransactionToFeed(tx, val);
+                            updateStats(val);
+                            addChartMarker(val, tx.from, timestamp);
+
+                            // Telegram Notification
+                            const fromAlias = state.aliases[tx.from.toLowerCase()] || tx.from.substring(0, 6);
+                            const toAlias = state.aliases[(tx.to || '').toLowerCase()] || (tx.to ? tx.to.substring(0, 6) : 'Unknown');
+                            const msg = `🚨 <b>Whale Alert!</b>\nAmount: ${val.toFixed(2)} ETH\nFrom: ${fromAlias}\nTo: ${toAlias}\n<a href="https://etherscan.io/tx/${tx.hash}">View on Etherscan</a>`;
+                            sendTelegramMessage(msg);
+                        }
+                    });
+                }
+                state.currentBlock = latest;
             }
-            state.currentBlock = latest;
         }
+    } catch (e) {
+        console.error("Scan error:", e);
     }
 
     state.timer = setTimeout(scanNewBlocks, state.interval * 1000);
@@ -289,34 +358,50 @@ async function scanHistory() {
     state.totalEthMoved = 0;
     elements.whalesCount.textContent = '0';
     elements.totalEthMoved.textContent = '0 ETH';
+    elements.txFeed.innerHTML = '<div class="empty-feed"><p>Загрузка истории...</p></div>';
 
-    // Scan last 200 blocks for history (~40 mins)
-    // Deep scanning (>200 blocks) is not recommended for free tier Etherscan API
     const latest = await fetchLatestBlock();
     if (!latest) return;
 
-    const startBlock = latest - 200;
+    // Scan last 500 blocks (approx 1.5 - 2 hours)
+    // This provides better context for 1m and 1h charts
+    const scanCount = 500;
+    const startBlock = latest - scanCount;
     const endBlock = latest;
 
-    elements.statusText.textContent = 'Загрузка истории...';
+    elements.statusText.textContent = `История (0/${scanCount})...`;
 
     for (let b = startBlock; b <= endBlock; b++) {
-        if (!state.isHistoryMode) break; // Allow stopping
+        if (!state.isHistoryMode) break;
 
+        const progress = Math.round(((b - startBlock) / scanCount) * 100);
+        elements.statusText.textContent = `История ${progress}%...`;
         elements.currentBlock.textContent = b;
 
         // Throttling for Etherscan Free API (5 calls/sec limit)
-        await new Promise(r => setTimeout(r, 250));
+        await new Promise(r => setTimeout(r, 220));
 
         const { timestamp, transactions } = await fetchBlockTransactions(b);
         transactions.forEach(tx => {
             const val = parseInt(tx.value, 16) / 1e18;
             if (val >= state.threshold) {
+                // Filter Exchanges
+                if (state.filterExchanges && (isExchangeWallet(tx.from) || isExchangeWallet(tx.to || ''))) {
+                    return;
+                }
+
                 addTransactionToFeed(tx, val);
                 updateStats(val);
-                addChartMarker(val, tx.from, timestamp);
+                // Skip markers update until full history is loaded
+                addChartMarker(val, tx.from, timestamp, true);
             }
         });
+    }
+
+    // Final markers sort and update
+    if (state.markers.length > 0) {
+        state.markers.sort((a, b) => a.time - b.time);
+        LightweightCharts.createSeriesMarkers(state.candleSeries, state.markers);
     }
 
     elements.statusText.textContent = 'История загружена';
@@ -438,6 +523,65 @@ elements.modeHistory.addEventListener('change', (e) => {
     if (state.isHistoryMode && state.isMonitoring) {
         scanHistory();
     }
+});
+
+// Helper Functions
+function isExchangeWallet(address) {
+    return KNOWN_EXCHANGES[address.toLowerCase()] !== undefined;
+}
+
+async function sendTelegramMessage(text) {
+    if (!state.telegramToken || !state.telegramChatId) return;
+
+    // Use CORS Proxy to bypass browser restrictions on Telegram API
+    const tgUrl = `https://api.telegram.org/bot${state.telegramToken}/sendMessage`;
+    const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(tgUrl)}`;
+
+    const params = {
+        chat_id: state.telegramChatId,
+        text: text,
+        parse_mode: 'HTML',
+        disable_web_page_preview: true
+    };
+
+    try {
+        const response = await fetch(proxyUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(params)
+        });
+        const data = await response.json();
+        if (!data.ok) {
+            console.error("Telegram Error:", data);
+        }
+    } catch (e) {
+        console.error("Telegram Network Error:", e);
+    }
+}
+
+// Event Listeners for New Settings
+elements.tgBotToken.addEventListener('change', (e) => {
+    state.telegramToken = e.target.value.trim();
+    localStorage.setItem('eth_whale_tg_token', state.telegramToken);
+});
+
+elements.tgChatId.addEventListener('change', (e) => {
+    state.telegramChatId = e.target.value.trim();
+    localStorage.setItem('eth_whale_tg_chat_id', state.telegramChatId);
+});
+
+elements.filterExchanges.addEventListener('change', (e) => {
+    state.filterExchanges = e.target.checked;
+    localStorage.setItem('eth_whale_filter_exchanges', state.filterExchanges);
+});
+
+elements.testTgBtn.addEventListener('click', async () => {
+    if (!state.telegramToken || !state.telegramChatId) {
+        alert("Please enter Bot Token and Chat ID first.");
+        return;
+    }
+    await sendTelegramMessage("🐋 <b>Whale Tracker Test</b>\nSuccess! Notifications are working.");
+    alert("Test message sent. Check your Telegram.");
 });
 
 // Initialize Chart on load
