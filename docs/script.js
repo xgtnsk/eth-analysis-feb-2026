@@ -70,7 +70,7 @@ async function initChart() {
     };
 
     state.chart = LightweightCharts.createChart(document.getElementById('chart-container'), chartOptions);
-    state.candleSeries = state.chart.addCandlestickSeries({
+    state.candleSeries = state.chart.addSeries(LightweightCharts.CandlestickSeries, {
         upColor: '#10b981',
         downColor: '#ef4444',
         borderVisible: false,
