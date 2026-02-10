@@ -1,534 +1,636 @@
-:root {
-    --bg-color: #05070a;
-    --card-bg: rgba(255, 255, 255, 0.03);
-    --border-color: rgba(255, 255, 255, 0.08);
-    --text-primary: #f0f2f5;
-    --text-secondary: #94a3b8;
-    --accent-primary: #3b82f6;
-    /* Electric Blue */
-    --accent-secondary: #10b981;
-    /* Emerald Green */
-    --accent-danger: #ef4444;
-    --glass-blur: blur(12px);
+// Configuration & State
+const BASE_URL = "https://api.etherscan.io/v2/api";
+const KNOWN_EXCHANGES = {
+    '0x28c6c06298d514db089934071355e5743bf21d60': 'Binance 14',
+    '0x21a31ee1afc51d94c2efccaa2092ad1028285549': 'Binance 15',
+    '0x3f5ce5fbfe3e9af3971dd833d26ba9b5c936f0be': 'Binance 16',
+    '0xd551234ae421e3bcba99a0da6d736074f22192ff': 'Binance 3',
+    '0x56eddb7aa87536c09ccc2793473599fd21a8b17f': 'Binance Hot',
+    '0x77696bb39917c91a0c3908d577d5e322095425ca': 'Binance Hot 2',
+    '0x47ac0fb4f2d84898e4d9e7b4dab3c24507a6d503': 'Binance Hot 6',
+    '0xdfd5293d8e347dfe59e90efd55b2956a1343963d': 'Binance 14',
+    '0xe78388b4ce79068e89bf8aa7f218ef6b9ab64418': 'Kraken 3',
+    '0x71660c4005ba85c37ccec55d0c4493e66fe775d3': 'Coinbase 1',
+    '0x503828976d22510aad0201ac7ec88293211d23da': 'Coinbase 2',
+    '0xddfabcdc4d8ffc6d5beaf154f18b778f892a0740': 'Coinbase 3',
+    '0xa090e606e30bd747d4e6245a1517ebd817d86d56': 'OKX 1',
+    '0x6cc5f688a315f3dc28a7781717a9a798a59fda7b': 'OKX 2'
+};
+
+let state = {
+    apiKey: localStorage.getItem('eth_whale_api_key') || '',
+    threshold: parseFloat(localStorage.getItem('eth_whale_threshold')) || 100,
+    interval: parseInt(localStorage.getItem('eth_whale_interval')) || 10,
+    aliases: JSON.parse(localStorage.getItem('eth_whale_aliases') || '{}'),
+    chartVisible: localStorage.getItem('eth_whale_chart_visible') !== 'false',
+    timeframe: 'hour', // minute, hour, day
+
+    // Telegram Settings
+    telegramToken: localStorage.getItem('eth_whale_tg_token') || '8421336656:AAEeNiiCcJbiyxRWJfIslw-vrvOq4aYkaPU',
+    telegramChatId: localStorage.getItem('eth_whale_tg_chat_id') || '8122958356',
+
+    // Filter Settings
+    filterExchanges: localStorage.getItem('eth_whale_filter_exchanges') === 'true',
+
+    currentBlock: 0,
+    whalesCount: 0,
+    totalEthMoved: 0,
+    isMonitoring: false,
+    timer: null,
+    chart: null,
+    candleSeries: null,
+    volumeSeries: null,
+    markers: [],
+    isHistoryMode: false
+};
+
+// DOM Elements
+const elements = {
+    apiKey: document.getElementById('api-key'),
+    toggleChart: document.getElementById('toggle-chart'),
+    chartSection: document.getElementById('chart-section'),
+    timeframeBtns: document.querySelectorAll('.tf-btn'),
+    threshold: document.getElementById('eth-threshold'),
+    interval: document.getElementById('refresh-interval'),
+    startBtn: document.getElementById('start-btn'),
+    statusDot: document.getElementById('status-dot'),
+    statusText: document.getElementById('status-text'),
+    modeHistory: document.getElementById('mode-history'),
+    currentBlock: document.getElementById('current-block'),
+    whalesCount: document.getElementById('whales-count'),
+    totalEthMoved: document.getElementById('total-eth-moved'),
+    txFeed: document.getElementById('tx-feed'),
+    clearBtn: document.getElementById('clear-feed'),
+    aliasModal: document.getElementById('alias-modal'),
+    modalAddress: document.getElementById('modal-address'),
+    aliasInput: document.getElementById('alias-input'),
+    saveAliasBtn: document.getElementById('save-alias'),
+    closeModalBtn: document.getElementById('close-modal'),
+    // New Settings
+    tgBotToken: document.getElementById('tg-bot-token'),
+    tgChatId: document.getElementById('tg-chat-id'),
+    testTgBtn: document.getElementById('test-tg-btn'),
+    filterExchanges: document.getElementById('filter-exchanges')
+};
+
+// Initial setup from localStorage
+elements.apiKey.value = state.apiKey;
+elements.threshold.value = state.threshold;
+elements.interval.value = state.interval;
+elements.toggleChart.checked = state.chartVisible;
+elements.chartSection.style.display = state.chartVisible ? 'block' : 'none';
+
+// New Settings Init
+elements.tgBotToken.value = state.telegramToken;
+elements.tgChatId.value = state.telegramChatId;
+elements.filterExchanges.checked = state.filterExchanges;
+
+// Chart Initialization
+async function initChart() {
+    const chartOptions = {
+        layout: {
+            background: { color: 'transparent' },
+            textColor: '#94a3b8',
+        },
+        grid: {
+            vertLines: { color: 'rgba(255, 255, 255, 0.05)' },
+            horzLines: { color: 'rgba(255, 255, 255, 0.05)' },
+        },
+        crosshair: {
+            mode: LightweightCharts.CrosshairMode.Normal,
+        },
+        rightPriceScale: {
+            borderColor: 'rgba(255, 255, 255, 0.1)',
+        },
+        timeScale: {
+            borderColor: 'rgba(255, 255, 255, 0.1)',
+            timeVisible: true,
+        },
+    };
+
+    state.chart = LightweightCharts.createChart(document.getElementById('chart-container'), chartOptions);
+    state.candleSeries = state.chart.addSeries(LightweightCharts.CandlestickSeries, {
+        upColor: '#10b981',
+        downColor: '#ef4444',
+        borderVisible: false,
+        wickUpColor: '#10b981',
+        wickDownColor: '#ef4444',
+        borderVisible: false,
+        wickUpColor: '#10b981',
+        wickDownColor: '#ef4444',
+    });
+
+    state.volumeSeries = state.chart.addSeries(LightweightCharts.HistogramSeries, {
+        color: '#3b82f6',
+        priceFormat: { type: 'volume' },
+        priceScaleId: '', // Set initial scale ID
+    });
+
+    state.volumeSeries.priceScale().applyOptions({
+        scaleMargins: {
+            top: 0.8, // Volume histogram occupies the bottom 20%
+            bottom: 0,
+        },
+    });
+
+    await fetchChartData();
 }
 
-* {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-}
+async function fetchChartData() {
+    try {
+        // Fetch 200 items for the selected timeframe
+        const limit = 200;
+        // Using Binance ETH-USDT Spot
+        const response = await fetch(`https://min-api.cryptocompare.com/data/v2/histo${state.timeframe}?fsym=ETH&tsym=USDT&limit=${limit}&e=Binance`);
+        const data = await response.json();
 
-body {
-    background-color: var(--bg-color);
-    color: var(--text-primary);
-    font-family: 'Outfit', sans-serif;
-    min-height: 100vh;
-    overflow-x: hidden;
-}
+        if (data.Data && data.Data.Data) {
+            const candles = [];
+            const volumes = [];
 
-.glass-bg {
-    position: fixed;
-    top: -50%;
-    left: -50%;
-    width: 200%;
-    height: 200%;
-    background: radial-gradient(circle at center, rgba(59, 130, 246, 0.05) 0%, transparent 40%);
-    z-index: -1;
-    pointer-events: none;
-}
+            data.Data.Data.forEach(d => {
+                candles.push({
+                    time: d.time,
+                    open: d.open,
+                    high: d.high,
+                    low: d.low,
+                    close: d.close,
+                });
 
-.container {
-    max-width: 1000px;
-    margin: 0 auto;
-    padding: 2rem;
-}
+                volumes.push({
+                    time: d.time,
+                    value: d.volumeto,
+                    color: d.close >= d.open ? 'rgba(16, 185, 129, 0.5)' : 'rgba(239, 68, 68, 0.5)'
+                });
+            });
 
-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 2rem;
-}
-
-.header-controls {
-    display: flex;
-    align-items: center;
-    gap: 1.5rem;
-}
-
-/* Toggle Switch */
-.chart-toggle {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    font-size: 0.85rem;
-    color: var(--text-secondary);
-}
-
-.switch {
-    position: relative;
-    display: inline-block;
-    width: 38px;
-    height: 20px;
-}
-
-.switch input {
-    opacity: 0;
-    width: 0;
-    height: 0;
-}
-
-.slider {
-    position: absolute;
-    cursor: pointer;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: var(--card-bg);
-    border: 1px solid var(--border-color);
-    transition: .4s;
-}
-
-.slider:before {
-    position: absolute;
-    content: "";
-    height: 12px;
-    width: 12px;
-    left: 3px;
-    bottom: 3px;
-    background-color: var(--text-secondary);
-    transition: .4s;
-}
-
-input:checked+.slider {
-    background-color: rgba(59, 130, 246, 0.2);
-    border-color: var(--accent-primary);
-}
-
-input:checked+.slider:before {
-    transform: translateX(18px);
-    background-color: var(--accent-primary);
-}
-
-.slider.round {
-    border-radius: 20px;
-}
-
-.slider.round:before {
-    border-radius: 50%;
-}
-
-.dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #4b5563;
-}
-
-.dot.active {
-    background: var(--accent-secondary);
-    box-shadow: 0 0 10px var(--accent-secondary);
-}
-
-/* Cards */
-.card {
-    background: var(--card-bg);
-    backdrop-filter: var(--glass-blur);
-    border: 1px solid var(--border-color);
-    border-radius: 1.5rem;
-    padding: 1.5rem;
-    transition: transform 0.3s ease, border-color 0.3s ease;
-}
-
-.card:hover {
-    border-color: rgba(255, 255, 255, 0.15);
-}
-
-.card-header {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    margin-bottom: 1.5rem;
-    justify-content: space-between;
-}
-
-.card-header h2 {
-    font-size: 1.1rem;
-    font-weight: 600;
-}
-
-.space-between {
-    justify-content: space-between;
-}
-
-.header-left {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-}
-
-/* Settings */
-.settings-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 1.5rem;
-    margin-bottom: 2rem;
-}
-
-/* Settings Groups */
-.settings-group {
-    background: rgba(255, 255, 255, 0.03);
-    border-radius: 12px;
-    padding: 1.5rem;
-    margin-bottom: 1.5rem;
-    border: 1px solid rgba(255, 255, 255, 0.05);
-}
-
-.settings-group h3 {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    font-size: 1rem;
-    color: var(--text-secondary);
-    margin-bottom: 1rem;
-}
-
-.settings-group h3 i {
-    width: 18px;
-    height: 18px;
-}
-
-.input-group {
-    margin-bottom: 1rem;
-}
-
-.input-group label {
-    display: block;
-    font-size: 0.85rem;
-    color: var(--text-secondary);
-    /* Changed from --text-muted */
-    margin-bottom: 0.5rem;
-}
-
-input {
-    background: rgba(0, 0, 0, 0.3);
-    border: 1px solid var(--border-color);
-    border-radius: 0.75rem;
-    padding: 0.75rem 1rem;
-    color: white;
-    font-family: inherit;
-    font-size: 1rem;
-    transition: border-color 0.2s;
-}
-
-input:focus {
-    outline: none;
-    border-color: var(--accent-primary);
-}
-
-.input-group input {
-    width: 100%;
-    background: rgba(0, 0, 0, 0.3);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 8px;
-    padding: 0.75rem 1rem;
-    color: var(--text-primary);
-    font-size: 0.95rem;
-    transition: all 0.3s ease;
-}
-
-.input-group input:focus {
-    border-color: var(--accent-primary);
-    /* Changed from --primary */
-    outline: none;
-    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
-}
-
-.input-with-button {
-    display: flex;
-    gap: 0.5rem;
-}
-
-.input-with-suggest {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-}
-
-.suggest-pills {
-    display: flex;
-    gap: 0.5rem;
-}
-
-.pill {
-    background: transparent;
-    border: 1px solid var(--border-color);
-    color: var(--text-secondary);
-    padding: 0.25rem 0.6rem;
-    border-radius: 6px;
-    font-size: 0.75rem;
-    cursor: pointer;
-    transition: all 0.2s;
-}
-
-.pill:hover {
-    border-color: var(--accent-primary);
-    color: var(--accent-primary);
-}
-
-.btn-small {
-    background: rgba(255, 255, 255, 0.1);
-    border: none;
-    border-radius: 8px;
-    color: var(--text-secondary);
-    cursor: pointer;
-    padding: 0 1rem;
-    font-size: 0.9rem;
-    transition: all 0.2s;
-}
-
-.btn-small:hover {
-    background: rgba(255, 255, 255, 0.2);
-    color: var(--text-primary);
-}
-
-.switch-group {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-    color: var(--text-secondary);
-    font-size: 0.95rem;
-}
-
-/* Buttons */
-.btn-primary {
-    background: var(--accent-primary);
-    color: white;
-    border: none;
-    padding: 1rem 1.5rem;
-    border-radius: 1rem;
-    font-weight: 600;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.5rem;
-    width: 100%;
-    transition: opacity 0.2s, transform 0.2s;
-}
-
-.btn-primary:active {
-    transform: scale(0.98);
-}
-
-.btn-secondary {
-    background: var(--card-bg);
-    color: var(--text-primary);
-    border: 1px solid var(--border-color);
-    padding: 0.75rem 1.25rem;
-    border-radius: 0.75rem;
-    cursor: pointer;
-    font-weight: 600;
-}
-
-.btn-sm {
-    padding: 0.4rem 0.75rem;
-    font-size: 0.8rem;
-}
-
-/* Timeframe Selector */
-.timeframe-selector {
-    display: flex;
-    gap: 0.25rem;
-    background: rgba(0, 0, 0, 0.2);
-    padding: 0.25rem;
-    border-radius: 8px;
-    border: 1px solid var(--border-color);
-}
-
-.tf-btn {
-    background: transparent;
-    border: none;
-    color: var(--text-secondary);
-    padding: 0.35rem 0.75rem;
-    border-radius: 6px;
-    font-size: 0.75rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s;
-}
-
-.tf-btn:hover {
-    color: var(--text-primary);
-}
-
-.tf-btn.active {
-    background: var(--accent-primary);
-    color: white;
-}
-
-/* Stats */
-.stats-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 1.5rem;
-    margin: 2rem 0;
-}
-
-.stat-card {
-    display: flex;
-    flex-direction: column;
-    padding: 1.25rem;
-}
-
-.stat-label {
-    font-size: 0.75rem;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    color: var(--text-secondary);
-    margin-bottom: 0.5rem;
-}
-
-.stat-value {
-    font-size: 1.5rem;
-    font-weight: 800;
-    color: var(--text-primary);
-    font-family: 'JetBrains Mono', monospace;
-}
-
-/* Feed */
-.feed-container {
-    max-height: 500px;
-    overflow-y: auto;
-    padding-right: 0.5rem;
-}
-
-.feed-container::-webkit-scrollbar {
-    width: 4px;
-}
-
-.feed-container::-webkit-scrollbar-track {
-    background: transparent;
-}
-
-.feed-container::-webkit-scrollbar-thumb {
-    background: var(--border-color);
-    border-radius: 10px;
-}
-
-.tx-item {
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid var(--border-color);
-    border-radius: 1rem;
-    padding: 1rem;
-    margin-bottom: 1rem;
-    animation: slideIn 0.4s ease-out;
-}
-
-@keyframes slideIn {
-    from {
-        opacity: 0;
-        transform: translateY(10px);
-    }
-
-    to {
-        opacity: 1;
-        transform: translateY(0);
+            state.candleSeries.setData(candles);
+            state.volumeSeries.setData(volumes);
+            state.chart.timeScale().fitContent();
+        }
+    } catch (e) {
+        console.error("Chart data fetch error:", e);
     }
 }
 
-.tx-header {
-    display: flex;
-    justify-content: space-between;
-    margin-bottom: 0.75rem;
+function addChartMarker(valueEth, address, blockTime, skipUpdate = false) {
+    if (!state.candleSeries) return;
+
+    // Use block timestamp if provided.
+    // CRITICAL: Do NOT fallback to Date.now() if blockTime is missing/invalid, 
+    // as this causes historical transactions to appear on the current candle.
+    let markerTime = blockTime;
+
+    if (!markerTime) {
+        console.warn("Skipping marker due to missing timestamp", address);
+        return;
+    }
+
+    // Round time to the nearest interval to ensure it snaps to a candle
+    // IMPORTANT: Snap to the BEGINNING of the period to match CryptoCompare data
+    if (state.timeframe === 'minute') markerTime = Math.floor(markerTime / 60) * 60;
+    else if (state.timeframe === 'hour') markerTime = Math.floor(markerTime / 3600) * 3600;
+    else if (state.timeframe === 'day') markerTime = Math.floor(markerTime / 86400) * 86400;
+
+    const alias = state.aliases[address.toLowerCase()] || address.substring(0, 6) + '...';
+
+    state.markers.push({
+        time: markerTime,
+        position: 'aboveBar',
+        color: '#ef4444', // Red
+        shape: 'arrowDown',
+        text: `${valueEth.toFixed(0)} ETH (${alias})`,
+        size: 2
+    });
+
+    if (!skipUpdate) {
+        // Sort markers by time (required by Lightweight Charts)
+        state.markers.sort((a, b) => a.time - b.time);
+        // Use v5 API to set markers
+        LightweightCharts.createSeriesMarkers(state.candleSeries, state.markers);
+    }
 }
 
-.tx-value {
-    font-weight: 800;
-    color: var(--accent-secondary);
-    font-family: 'JetBrains Mono', monospace;
+// Functions
+async function fetchLatestBlock() {
+    const params = new URLSearchParams({
+        chainid: "1",
+        module: "proxy",
+        action: "eth_blockNumber",
+        apikey: state.apiKey
+    });
+    try {
+        const response = await fetch(`${BASE_URL}?${params}`);
+        const data = await response.json();
+        if (data.result && typeof data.result === 'string') {
+            return parseInt(data.result, 16);
+        }
+    } catch (e) {
+        console.error("Block fetch error:", e);
+    }
+    return null;
 }
 
-.tx-time {
-    font-size: 0.75rem;
-    color: var(--text-secondary);
+async function fetchBlockTransactions(blockNumber) {
+    const params = new URLSearchParams({
+        chainid: "1",
+        module: "proxy",
+        action: "eth_getBlockByNumber",
+        tag: "0x" + blockNumber.toString(16),
+        boolean: "true",
+        apikey: state.apiKey
+    });
+    try {
+        const response = await fetch(`${BASE_URL}?${params}`);
+        const data = await response.json();
+        if (data.result) {
+            return {
+                timestamp: parseInt(data.result.timestamp, 16),
+                transactions: data.result.transactions || []
+            };
+        } else {
+            console.warn("Block fetch returned no result", data);
+        }
+    } catch (e) {
+        console.error("Tx fetch error:", e);
+    }
+    return { timestamp: null, transactions: [] };
 }
 
-.tx-details {
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-    font-size: 0.85rem;
+function updateStats(valueEth) {
+    state.whalesCount++;
+    state.totalEthMoved += valueEth;
+    elements.whalesCount.textContent = state.whalesCount;
+    elements.totalEthMoved.textContent = `${state.totalEthMoved.toLocaleString()} ETH`;
 }
 
-.tx-row {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
+function getDisplayAddress(address) {
+    if (state.aliases[address.toLowerCase()]) {
+        return `<span class="alias-name">${state.aliases[address.toLowerCase()]}</span>`;
+    }
+    return `<span class="mono-address">${address.slice(0, 6)}...${address.slice(-4)}</span>`;
 }
 
-.mono-address {
-    font-family: 'JetBrains Mono', monospace;
-    opacity: 0.8;
+function addTransactionToFeed(tx, valueEth) {
+    const time = new Date().toLocaleTimeString();
+    const item = document.createElement('div');
+    item.className = 'tx-item';
+
+    item.innerHTML = `
+        <div class="tx-header">
+            <span class="tx-value">🐋 ${valueEth.toFixed(2)} ETH</span>
+            <span class="tx-time">${time}</span>
+        </div>
+        <div class="tx-details">
+            <div class="tx-row">
+                <strong>От:</strong> ${getDisplayAddress(tx.from)}
+                <button class="btn-alias" onclick="openAliasModal('${tx.from}')">Имя</button>
+            </div>
+            <div class="tx-row">
+                <strong>Кому:</strong> ${getDisplayAddress(tx.to || 'Unknown')}
+                <button class="btn-alias" onclick="openAliasModal('${tx.to}')">Имя</button>
+            </div>
+            <a href="https://etherscan.io/tx/${tx.hash}" target="_blank" class="tx-link">🔗 View on Etherscan</a>
+        </div>
+    `;
+
+    // Remove empty state message
+    const empty = elements.txFeed.querySelector('.empty-feed');
+    if (empty) empty.remove();
+
+    elements.txFeed.prepend(item);
 }
 
-.tx-link {
-    color: var(--accent-primary);
-    text-decoration: none;
-    margin-top: 0.5rem;
-    display: inline-block;
-    font-weight: 600;
+async function scanNewBlocks() {
+    if (!state.isMonitoring) return;
+
+    try {
+        const latest = await fetchLatestBlock();
+        if (latest && latest > state.currentBlock) {
+            if (state.currentBlock === 0) {
+                state.currentBlock = latest;
+            } else {
+                // Limit catch-up to 10 blocks to avoid rapid API depletion
+                const start = Math.max(state.currentBlock + 1, latest - 10);
+                for (let b = start; b <= latest; b++) {
+                    elements.currentBlock.textContent = b;
+
+                    // Throttling for safety
+                    if (b > start) await new Promise(r => setTimeout(r, 200));
+
+                    const { timestamp, transactions } = await fetchBlockTransactions(b);
+                    transactions.forEach(tx => {
+                        const val = parseInt(tx.value, 16) / 1e18;
+                        if (val >= state.threshold) {
+                            // Filter Exchanges
+                            if (state.filterExchanges && (isExchangeWallet(tx.from) || isExchangeWallet(tx.to || ''))) {
+                                return;
+                            }
+
+                            addTransactionToFeed(tx, val);
+                            updateStats(val);
+                            addChartMarker(val, tx.from, timestamp);
+
+                            // Telegram Notification
+                            const fromAlias = state.aliases[tx.from.toLowerCase()] || tx.from.substring(0, 6);
+                            const toAlias = state.aliases[(tx.to || '').toLowerCase()] || (tx.to ? tx.to.substring(0, 6) : 'Unknown');
+                            const msg = `🚨 <b>Whale Alert!</b>\nAmount: ${val.toFixed(2)} ETH\nFrom: ${fromAlias}\nTo: ${toAlias}\n<a href="https://etherscan.io/tx/${tx.hash}">View on Etherscan</a>`;
+                            sendTelegramMessage(msg);
+                        }
+                    });
+                }
+                state.currentBlock = latest;
+            }
+        }
+    } catch (e) {
+        console.error("Scan error:", e);
+    }
+
+    state.timer = setTimeout(scanNewBlocks, state.interval * 1000);
 }
 
-.btn-alias {
-    background: transparent;
-    border: 1px solid var(--accent-primary);
-    color: var(--accent-primary);
-    padding: 0.1rem 0.4rem;
-    border-radius: 4px;
-    font-size: 0.7rem;
-    cursor: pointer;
-    margin-left: 0.5rem;
+async function scanHistory() {
+    if (!state.apiKey) return;
+
+    // Clear old markers and stats for fresh history
+    state.markers = [];
+    state.whalesCount = 0;
+    state.totalEthMoved = 0;
+    elements.whalesCount.textContent = '0';
+    elements.totalEthMoved.textContent = '0 ETH';
+    elements.txFeed.innerHTML = '<div class="empty-feed"><p>Загрузка истории...</p></div>';
+
+    const latest = await fetchLatestBlock();
+    if (!latest) return;
+
+    // Scan last 500 blocks (approx 1.5 - 2 hours)
+    // This provides better context for 1m and 1h charts
+    const scanCount = 500;
+    const startBlock = latest - scanCount;
+    const endBlock = latest;
+
+    elements.statusText.textContent = `История (0/${scanCount})...`;
+
+    for (let b = startBlock; b <= endBlock; b++) {
+        if (!state.isHistoryMode) break;
+
+        const progress = Math.round(((b - startBlock) / scanCount) * 100);
+        elements.statusText.textContent = `История ${progress}%...`;
+        elements.currentBlock.textContent = b;
+
+        // Throttling for Etherscan Free API (5 calls/sec limit)
+        await new Promise(r => setTimeout(r, 220));
+
+        const { timestamp, transactions } = await fetchBlockTransactions(b);
+        transactions.forEach(tx => {
+            const val = parseInt(tx.value, 16) / 1e18;
+            if (val >= state.threshold) {
+                // Filter Exchanges
+                if (state.filterExchanges && (isExchangeWallet(tx.from) || isExchangeWallet(tx.to || ''))) {
+                    return;
+                }
+
+                addTransactionToFeed(tx, val);
+                updateStats(val);
+                // Skip markers update until full history is loaded
+                addChartMarker(val, tx.from, timestamp, true);
+            }
+        });
+    }
+
+    // Final markers sort and update
+    if (state.markers.length > 0) {
+        state.markers.sort((a, b) => a.time - b.time);
+        LightweightCharts.createSeriesMarkers(state.candleSeries, state.markers);
+    }
+
+    elements.statusText.textContent = 'История загружена';
+    setTimeout(() => {
+        if (state.isMonitoring) elements.statusText.textContent = 'Работает';
+        else elements.statusText.textContent = 'Остановлено';
+    }, 2000);
 }
 
-.alias-name {
-    color: var(--accent-primary);
-    font-weight: 700;
+// Event Handlers
+elements.toggleChart.addEventListener('change', (e) => {
+    state.chartVisible = e.target.checked;
+    localStorage.setItem('eth_whale_chart_visible', state.chartVisible);
+    elements.chartSection.style.display = state.chartVisible ? 'block' : 'none';
+    if (state.chartVisible && state.chart) {
+        // Redraw or resize chart when shown
+        state.chart.applyOptions({ width: elements.chartSection.clientWidth - 48 });
+    }
+});
+
+// Timeframe Button Listeners
+elements.timeframeBtns.forEach(btn => {
+    btn.addEventListener('click', async () => {
+        const tf = btn.dataset.tf;
+        if (tf === state.timeframe) return;
+
+        // Update UI
+        elements.timeframeBtns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+
+        // Update State & Fetch
+        state.timeframe = tf;
+        await fetchChartData();
+    });
+});
+
+elements.startBtn.addEventListener('click', () => {
+    if (state.isMonitoring) {
+        state.isMonitoring = false;
+        clearTimeout(state.timer);
+        elements.startBtn.innerHTML = '<i data-lucide="play"></i> Запустить мониторинг';
+        elements.statusDot.classList.remove('active');
+        elements.statusText.textContent = 'Остановлено';
+        lucide.createIcons();
+    } else {
+        // Save settings
+        state.apiKey = elements.apiKey.value.trim();
+        state.threshold = parseFloat(elements.threshold.value) || 100;
+        state.interval = parseInt(elements.interval.value) || 10;
+
+        if (!state.apiKey) {
+            alert("Пожалуйста, введите API Key");
+            return;
+        }
+
+        if (state.isHistoryMode) {
+            scanHistory();
+        }
+
+        localStorage.setItem('eth_whale_api_key', state.apiKey);
+        localStorage.setItem('eth_whale_threshold', state.threshold);
+        localStorage.setItem('eth_whale_interval', state.interval);
+
+        state.isMonitoring = true;
+        state.currentBlock = 0; // Reset to catch next block
+        elements.startBtn.innerHTML = '<i data-lucide="square"></i> Остановить';
+        elements.statusDot.classList.add('active');
+        elements.statusText.textContent = 'Работает';
+        lucide.createIcons();
+        scanNewBlocks();
+    }
+});
+
+elements.clearBtn.addEventListener('click', () => {
+    elements.txFeed.innerHTML = '<div class="empty-feed"><p>Лента очищена</p></div>';
+    state.whalesCount = 0;
+    state.totalEthMoved = 0;
+    elements.whalesCount.textContent = '0';
+    elements.totalEthMoved.textContent = '0 ETH';
+});
+
+// Alias Modal Logic
+window.openAliasModal = function (address) {
+    if (!address) return;
+    state.pendingAddress = address.toLowerCase();
+    elements.modalAddress.textContent = address;
+    elements.aliasInput.value = state.aliases[state.pendingAddress] || '';
+    elements.aliasModal.classList.add('active');
+};
+
+elements.saveAliasBtn.addEventListener('click', () => {
+    const alias = elements.aliasInput.value.trim();
+    if (alias) {
+        state.aliases[state.pendingAddress] = alias;
+    } else {
+        delete state.aliases[state.pendingAddress];
+    }
+    localStorage.setItem('eth_whale_aliases', JSON.stringify(state.aliases));
+    elements.aliasModal.classList.remove('active');
+    // Refresh feed to show new names (optional)
+});
+
+elements.closeModalBtn.addEventListener('click', () => {
+    elements.aliasModal.classList.remove('active');
+});
+
+// Pills interaction
+document.querySelectorAll('.pill').forEach(pill => {
+    pill.addEventListener('click', () => {
+        const val = pill.dataset.val;
+        const parentInput = pill.closest('.input-with-suggest').querySelector('input');
+        parentInput.value = val;
+    });
+});
+
+// Mode Toggle
+elements.modeHistory.addEventListener('change', (e) => {
+    state.isHistoryMode = e.target.checked;
+    if (state.isHistoryMode && state.isMonitoring) {
+        scanHistory();
+    }
+});
+
+// Helper Functions
+function isExchangeWallet(address) {
+    return KNOWN_EXCHANGES[address.toLowerCase()] !== undefined;
 }
 
-/* Modals */
-.modal {
-    display: none;
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0, 0, 0, 0.8);
-    backdrop-filter: blur(4px);
-    z-index: 1000;
-    align-items: center;
-    justify-content: center;
+async function sendTelegramMessage(text) {
+    if (!state.telegramToken || !state.telegramChatId) return false;
+
+    const encodedText = encodeURIComponent(text);
+    const directUrl = `https://api.telegram.org/bot${state.telegramToken}/sendMessage?chat_id=${state.telegramChatId}&text=${encodedText}&parse_mode=HTML`;
+
+    const proxies = [
+        // 1. corsproxy.io (Standard)
+        {
+            url: `https://corsproxy.io/?${encodeURIComponent(`https://api.telegram.org/bot${state.telegramToken}/sendMessage`)}`,
+            method: 'POST',
+            body: {
+                chat_id: state.telegramChatId,
+                text: text,
+                parse_mode: 'HTML',
+                disable_web_page_preview: true
+            }
+        },
+        // 2. allorigins.win (Fallback, GET only)
+        {
+            url: `https://api.allorigins.win/raw?url=${encodeURIComponent(directUrl)}`,
+            method: 'GET'
+        },
+        // 3. thingproxy (Fallback 2)
+        {
+            url: `https://thingproxy.freeboard.io/fetch/${`https://api.telegram.org/bot${state.telegramToken}/sendMessage`}`,
+            method: 'POST',
+            body: {
+                chat_id: state.telegramChatId,
+                text: text,
+                parse_mode: 'HTML'
+            }
+        }
+    ];
+
+    for (const proxy of proxies) {
+        try {
+            const options = {
+                method: proxy.method,
+                headers: proxy.method === 'POST' ? { 'Content-Type': 'application/json' } : {}
+            };
+            
+            if (proxy.method === 'POST') {
+                options.body = JSON.stringify(proxy.body);
+            }
+
+            const response = await fetch(proxy.url, options);
+            const data = await response.json();
+            
+            if (data.ok) {
+                console.log("Telegram sent successfully via", proxy.url);
+                return true;
+            } else {
+                console.error("Telegram API Error:", data);
+            }
+        } catch (e) {
+            console.warn(`Proxy failed (${proxy.url}):`, e);
+        }
+    }
+
+    console.error("All Telegram proxies failed.");
+    return false;
 }
 
-.modal.active {
-    display: flex;
-}
+// Event Listeners for New Settings
+elements.tgBotToken.addEventListener('change', (e) => {
+    state.telegramToken = e.target.value.trim();
+    localStorage.setItem('eth_whale_tg_token', state.telegramToken);
+});
 
-.modal-content {
-    width: 90%;
-    max-width: 400px;
-}
+elements.tgChatId.addEventListener('change', (e) => {
+    state.telegramChatId = e.target.value.trim();
+    localStorage.setItem('eth_whale_tg_chat_id', state.telegramChatId);
+});
 
-.modal-actions {
-    display: flex;
-    gap: 1rem;
-    margin-top: 1.5rem;
-}
+elements.filterExchanges.addEventListener('change', (e) => {
+    state.filterExchanges = e.target.checked;
+    localStorage.setItem('eth_whale_filter_exchanges', state.filterExchanges);
+});
 
-.empty-feed {
-    text-align: center;
-    padding: 3rem;
-    color: var(--text-secondary);
-}
+elements.testTgBtn.addEventListener('click', async () => {
+    if (!state.telegramToken || !state.telegramChatId) {
+        alert("Please enter Bot Token and Chat ID first.");
+        return;
+    }
+    
+    const originalText = elements.testTgBtn.textContent;
+    elements.testTgBtn.textContent = "Sending...";
+    elements.testTgBtn.disabled = true;
+
+    const success = await sendTelegramMessage("🐋 <b>Whale Tracker Test</b>\nSuccess! Notifications are working.");
+    
+    elements.testTgBtn.textContent = originalText;
+    elements.testTgBtn.disabled = false;
+
+    if (success) {
+        alert("Test message sent! Check your Telegram.");
+    } else {
+        alert("Failed to send message. Please check the Console (F12) for errors.");
+    }
+});
+
+// Initialize Chart on load
+initChart();
