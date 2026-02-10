@@ -14,7 +14,9 @@ let state = {
     timer: null,
     chart: null,
     candleSeries: null,
-    markers: []
+    volumeSeries: null,
+    markers: [],
+    isHistoryMode: false
 };
 
 // DOM Elements
@@ -28,6 +30,7 @@ const elements = {
     startBtn: document.getElementById('start-btn'),
     statusDot: document.getElementById('status-dot'),
     statusText: document.getElementById('status-text'),
+    modeHistory: document.getElementById('mode-history'),
     currentBlock: document.getElementById('current-block'),
     whalesCount: document.getElementById('whales-count'),
     totalEthMoved: document.getElementById('total-eth-moved'),
@@ -79,6 +82,19 @@ async function initChart() {
         wickDownColor: '#ef4444',
     });
 
+    state.volumeSeries = state.chart.addSeries(LightweightCharts.HistogramSeries, {
+        color: '#3b82f6',
+        priceFormat: { type: 'volume' },
+        priceScaleId: '', // Set initial scale ID
+    });
+
+    state.volumeSeries.priceScale().applyOptions({
+        scaleMargins: {
+            top: 0.8, // Volume histogram occupies the bottom 20%
+            bottom: 0,
+        },
+    });
+
     await fetchChartData();
 }
 
@@ -91,14 +107,27 @@ async function fetchChartData() {
         const data = await response.json();
 
         if (data.Data && data.Data.Data) {
-            const formattedData = data.Data.Data.map(d => ({
-                time: d.time,
-                open: d.open,
-                high: d.high,
-                low: d.low,
-                close: d.close,
-            }));
-            state.candleSeries.setData(formattedData);
+            const candles = [];
+            const volumes = [];
+
+            data.Data.Data.forEach(d => {
+                candles.push({
+                    time: d.time,
+                    open: d.open,
+                    high: d.high,
+                    low: d.low,
+                    close: d.close,
+                });
+
+                volumes.push({
+                    time: d.time,
+                    value: d.volumeto,
+                    color: d.close >= d.open ? 'rgba(16, 185, 129, 0.5)' : 'rgba(239, 68, 68, 0.5)'
+                });
+            });
+
+            state.candleSeries.setData(candles);
+            state.volumeSeries.setData(volumes);
             state.chart.timeScale().fitContent();
         }
     } catch (e) {
@@ -248,6 +277,38 @@ async function scanNewBlocks() {
     state.timer = setTimeout(scanNewBlocks, state.interval * 1000);
 }
 
+async function scanHistory() {
+    if (!state.apiKey) return;
+
+    // Scan last 50 blocks for history
+    const latest = await fetchLatestBlock();
+    if (!latest) return;
+
+    const startBlock = latest - 50;
+    const endBlock = latest;
+
+    elements.statusText.textContent = 'Загрузка истории...';
+
+    for (let b = startBlock; b <= endBlock; b++) {
+        elements.currentBlock.textContent = b;
+        const { timestamp, transactions } = await fetchBlockTransactions(b);
+        transactions.forEach(tx => {
+            const val = parseInt(tx.value, 16) / 1e18;
+            if (val >= state.threshold) {
+                addTransactionToFeed(tx, val);
+                updateStats(val);
+                addChartMarker(val, tx.from, timestamp);
+            }
+        });
+    }
+
+    elements.statusText.textContent = 'История загружена';
+    setTimeout(() => {
+        if (state.isMonitoring) elements.statusText.textContent = 'Работает';
+        else elements.statusText.textContent = 'Остановлено';
+    }, 2000);
+}
+
 // Event Handlers
 elements.toggleChart.addEventListener('change', (e) => {
     state.chartVisible = e.target.checked;
@@ -292,6 +353,10 @@ elements.startBtn.addEventListener('click', () => {
         if (!state.apiKey) {
             alert("Пожалуйста, введите API Key");
             return;
+        }
+
+        if (state.isHistoryMode) {
+            scanHistory();
         }
 
         localStorage.setItem('eth_whale_api_key', state.apiKey);
@@ -348,6 +413,14 @@ document.querySelectorAll('.pill').forEach(pill => {
         const parentInput = pill.closest('.input-with-suggest').querySelector('input');
         parentInput.value = val;
     });
+});
+
+// Mode Toggle
+elements.modeHistory.addEventListener('change', (e) => {
+    state.isHistoryMode = e.target.checked;
+    if (state.isHistoryMode && state.isMonitoring) {
+        scanHistory();
+    }
 });
 
 // Initialize Chart on load
