@@ -85,7 +85,7 @@ async function fetchChartData() {
     try {
         // Fetch 200 items for the selected timeframe
         const limit = 200;
-        const response = await fetch(`https://min-api.cryptocompare.com/data/v2/histoitem?fsym=ETH&tsym=USD&limit=${limit}&itemType=${state.timeframe}`);
+        const response = await fetch(`https://min-api.cryptocompare.com/data/v2/histo${state.timeframe}?fsym=ETH&tsym=USD&limit=${limit}`);
         const data = await response.json();
 
         if (data.Data && data.Data.Data) {
