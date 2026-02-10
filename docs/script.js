@@ -13,7 +13,8 @@ let state = {
     isMonitoring: false,
     timer: null,
     chart: null,
-    candleSeries: null
+    candleSeries: null,
+    markers: []
 };
 
 // DOM Elements
@@ -118,8 +119,7 @@ function addChartMarker(valueEth, address, blockTime) {
 
     const alias = state.aliases[address.toLowerCase()] || address.substring(0, 6) + '...';
 
-    const markers = state.candleSeries.getMarkers() || [];
-    markers.push({
+    state.markers.push({
         time: markerTime,
         position: 'aboveBar',
         color: '#ef4444', // Red
@@ -128,7 +128,8 @@ function addChartMarker(valueEth, address, blockTime) {
         size: 2
     });
 
-    state.candleSeries.setMarkers(markers);
+    // Use v5 API to set markers
+    LightweightCharts.createSeriesMarkers(state.candleSeries, state.markers);
 }
 
 // Functions
