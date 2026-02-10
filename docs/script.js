@@ -85,7 +85,8 @@ async function fetchChartData() {
     try {
         // Fetch 200 items for the selected timeframe
         const limit = 200;
-        const response = await fetch(`https://min-api.cryptocompare.com/data/v2/histo${state.timeframe}?fsym=ETH&tsym=USD&limit=${limit}`);
+        // Using Binance ETH-USDT Spot
+        const response = await fetch(`https://min-api.cryptocompare.com/data/v2/histo${state.timeframe}?fsym=ETH&tsym=USDT&limit=${limit}&e=Binance`);
         const data = await response.json();
 
         if (data.Data && data.Data.Data) {
@@ -104,18 +105,25 @@ async function fetchChartData() {
     }
 }
 
-function addChartMarker(valueEth, address) {
+function addChartMarker(valueEth, address, blockTime) {
     if (!state.candleSeries) return;
 
-    const time = Math.floor(Date.now() / 1000);
-    const alias = state.aliases[address.toLowerCase()] || 'Whale';
+    // Use block timestamp if provided, otherwise fallback to current time
+    let markerTime = blockTime || Math.floor(Date.now() / 1000);
+
+    // Round time to the nearest interval to ensure it snaps to a candle
+    if (state.timeframe === 'minute') markerTime = Math.floor(markerTime / 60) * 60;
+    if (state.timeframe === 'hour') markerTime = Math.floor(markerTime / 3600) * 3600;
+    if (state.timeframe === 'day') markerTime = Math.floor(markerTime / 86400) * 86400;
+
+    const alias = state.aliases[address.toLowerCase()] || address.substring(0, 6) + '...';
 
     const markers = state.candleSeries.getMarkers() || [];
     markers.push({
-        time: time,
+        time: markerTime,
         position: 'aboveBar',
-        color: '#3b82f6',
-        shape: 'circle',
+        color: '#ef4444', // Red
+        shape: 'arrowDown',
         text: `${valueEth.toFixed(0)} ETH (${alias})`,
         size: 2
     });
@@ -155,13 +163,16 @@ async function fetchBlockTransactions(blockNumber) {
     try {
         const response = await fetch(`${BASE_URL}?${params}`);
         const data = await response.json();
-        if (data.result && data.result.transactions) {
-            return data.result.transactions;
+        if (data.result) {
+            return {
+                timestamp: parseInt(data.result.timestamp, 16),
+                transactions: data.result.transactions || []
+            };
         }
     } catch (e) {
         console.error("Tx fetch error:", e);
     }
-    return [];
+    return { timestamp: 0, transactions: [] };
 }
 
 function updateStats(valueEth) {
@@ -218,14 +229,14 @@ async function scanNewBlocks() {
         } else {
             for (let b = state.currentBlock + 1; b <= latest; b++) {
                 elements.currentBlock.textContent = b;
-                const transactions = await fetchBlockTransactions(b);
+                const { timestamp, transactions } = await fetchBlockTransactions(b);
                 transactions.forEach(tx => {
                     const val = parseInt(tx.value, 16) / 1e18;
                     if (val >= state.threshold) {
                         addTransactionToFeed(tx, val);
                         updateStats(val);
                         // All transactions above threshold appear on chart as red arrows
-                        addChartMarker(val, tx.from);
+                        addChartMarker(val, tx.from, timestamp);
                     }
                 });
             }
