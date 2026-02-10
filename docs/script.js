@@ -224,9 +224,8 @@ async function scanNewBlocks() {
                     if (val >= state.threshold) {
                         addTransactionToFeed(tx, val);
                         updateStats(val);
-                        if (val >= 5000) {
-                            addChartMarker(val, tx.from);
-                        }
+                        // All transactions above threshold appear on chart as red arrows
+                        addChartMarker(val, tx.from);
                     }
                 });
             }
