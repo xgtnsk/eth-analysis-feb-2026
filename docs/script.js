@@ -157,6 +157,9 @@ function addChartMarker(valueEth, address, blockTime) {
         size: 2
     });
 
+    // Sort markers by time (required by Lightweight Charts)
+    state.markers.sort((a, b) => a.time - b.time);
+
     // Use v5 API to set markers
     LightweightCharts.createSeriesMarkers(state.candleSeries, state.markers);
 }
@@ -280,17 +283,31 @@ async function scanNewBlocks() {
 async function scanHistory() {
     if (!state.apiKey) return;
 
-    // Scan last 50 blocks for history
+    // Clear old markers and stats for fresh history
+    state.markers = [];
+    state.whalesCount = 0;
+    state.totalEthMoved = 0;
+    elements.whalesCount.textContent = '0';
+    elements.totalEthMoved.textContent = '0 ETH';
+
+    // Scan last 200 blocks for history (~40 mins)
+    // Deep scanning (>200 blocks) is not recommended for free tier Etherscan API
     const latest = await fetchLatestBlock();
     if (!latest) return;
 
-    const startBlock = latest - 50;
+    const startBlock = latest - 200;
     const endBlock = latest;
 
     elements.statusText.textContent = 'Загрузка истории...';
 
     for (let b = startBlock; b <= endBlock; b++) {
+        if (!state.isHistoryMode) break; // Allow stopping
+
         elements.currentBlock.textContent = b;
+
+        // Throttling for Etherscan Free API (5 calls/sec limit)
+        await new Promise(r => setTimeout(r, 250));
+
         const { timestamp, transactions } = await fetchBlockTransactions(b);
         transactions.forEach(tx => {
             const val = parseInt(tx.value, 16) / 1e18;
